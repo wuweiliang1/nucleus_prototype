@@ -58,6 +58,7 @@ metadata:
   name: nucleus
   namespace: nucleus
 spec:
+  type: NodePort
   selector:
     app: nucleus
   ports:
