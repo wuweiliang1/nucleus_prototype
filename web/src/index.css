@@ -1,6 +1,11 @@
 @import "tailwindcss";
 
 @layer base {
+  :root {
+    --nucleus-accent: #d4ef74;
+    --nucleus-mono: "Cascadia Mono", Consolas, "SFMono-Regular", monospace;
+  }
+
   body {
     font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
     background-color: #09090b;
@@ -23,10 +28,10 @@
   }
 }
 
-.nucleus-grid-bg {
-  background-image:
-    radial-gradient(circle at 50% 0%, rgba(99, 102, 241, 0.16), transparent 55%),
-    linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
-  background-size: 100% 100%, 40px 40px, 40px 40px;
+.nucleus-mark {
+  display: inline-block;
+  flex: 0 0 auto;
+  color: var(--nucleus-accent);
+  font: 750 1.15em/1 var(--nucleus-mono);
+  letter-spacing: -0.05em;
 }

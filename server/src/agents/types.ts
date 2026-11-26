@@ -1,3 +1,5 @@
+import type { ChatImage } from './images.js';
+
 export type AgentId = 'mike' | 'emma' | 'bob' | 'alex';
 
 export interface AgentProfile {
@@ -57,6 +59,10 @@ export interface OrchestrateInput {
   existingFiles: Record<string, string>;
   existingPrd: string;
   existingArchitecture: string;
+  existingSchema: SchemaCollection[];
+  brainstormMinutes?: string;
+  images?: ChatImage[];
+  targetAgent?: AgentId;
   selectedElement?: SelectedElementContext | null;
   runtimeError?: RuntimeErrorContext | null;
 }
@@ -67,22 +73,10 @@ export interface SchemaCollection {
   fields: Array<{ name: string; type: string; description: string }>;
 }
 
-export interface RaceCandidate {
-  id: string;
-  label: string;
-  model: string;
-  styleDirection: string;
-  summary: string;
-  files: Record<string, string>;
-  durationMs: number;
-}
-
 export type SseEvent =
   | { type: 'agent_start'; agent: AgentProfile; step: string }
   | { type: 'agent_message'; agent: AgentProfile; content: string; meta?: Record<string, unknown> }
   | { type: 'artifact_update'; prdMd?: string; architectureMd?: string; schemaJson?: SchemaCollection[] }
   | { type: 'files_update'; files: Record<string, string>; versionNumber: number; summary: string }
-  | { type: 'race_progress'; track: 'A' | 'B'; status: 'running' | 'done' | 'error'; label: string; model: string; durationMs?: number; error?: string }
-  | { type: 'race_ready'; sessionId: string; candidates: RaceCandidate[] }
   | { type: 'done'; projectId: string }
-  | { type: 'error'; message: string };
+  | { type: 'error'; message: string; agent?: AgentProfile };

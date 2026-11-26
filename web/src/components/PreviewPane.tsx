@@ -1,9 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle,
-  CheckCircle2,
   Crosshair,
-  Flame,
   Monitor,
   RefreshCw,
   Smartphone,
@@ -12,7 +10,6 @@ import {
 } from 'lucide-react';
 import { api } from '../api';
 import type {
-  RaceCandidate,
   RuntimeErrorContext,
   SelectedElementContext,
 } from '../types';
@@ -20,9 +17,6 @@ import type {
 interface Props {
   projectId: string;
   files: Record<string, string>;
-  raceSession: { sessionId: string; candidates: RaceCandidate[] } | null;
-  onSelectRaceWinner: (index: number) => Promise<void>;
-  onDismissRace: () => void;
   onElementSelected: (el: SelectedElementContext) => void;
   onAutoFixError: (err: RuntimeErrorContext) => void;
 }
@@ -30,19 +24,14 @@ interface Props {
 export function PreviewPane({
   projectId,
   files,
-  raceSession,
-  onSelectRaceWinner,
-  onDismissRace,
   onElementSelected,
   onAutoFixError,
 }: Props) {
   const [viewport, setViewport] = useState<'desktop' | 'mobile'>('desktop');
   const [inspectMode, setInspectMode] = useState(false);
   const [srcDoc, setSrcDoc] = useState('');
-  const [raceDocs, setRaceDocs] = useState<string[]>([]);
   const [runtimeError, setRuntimeError] = useState<RuntimeErrorContext | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
-  const [adoptingIdx, setAdoptingIdx] = useState<number | null>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
   const hasFiles = Object.keys(files).length > 0;
@@ -65,27 +54,6 @@ export function PreviewPane({
       cancelled = true;
     };
   }, [projectId, files, hasFiles, refreshKey]);
-
-  // Build Race Mode split bundles
-  useEffect(() => {
-    let cancelled = false;
-    if (!raceSession) {
-      setRaceDocs([]);
-      return;
-    }
-    Promise.all(
-      raceSession.candidates.map((c) =>
-        api.buildPreviewBundle(projectId, c.files, false).then((r) => r.html)
-      )
-    )
-      .then((docs) => {
-        if (!cancelled) setRaceDocs(docs);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [projectId, raceSession]);
 
   // Sync inspect mode to iframe
   useEffect(() => {
@@ -117,64 +85,6 @@ export function PreviewPane({
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
   }, [onElementSelected]);
-
-  // Race Mode Split Comparison View
-  if (raceSession && raceSession.candidates.length >= 2) {
-    return (
-      <div className="flex h-full flex-col bg-[#09090b]">
-        <div className="flex items-center justify-between border-b border-amber-500/30 bg-amber-500/10 px-4 py-2">
-          <div className="flex items-center gap-2 text-xs font-semibold text-amber-300">
-            <Flame className="h-4 w-4" />
-            Race Mode 双方案实时 PK — 直接在左右窗口中交互体验，选出胜者！
-          </div>
-          <button
-            onClick={onDismissRace}
-            className="rounded-lg border border-zinc-700 bg-zinc-900 px-2.5 py-1 text-xs text-zinc-300 hover:bg-zinc-800 cursor-pointer"
-          >
-            暂不采纳
-          </button>
-        </div>
-
-        <div className="grid flex-1 grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-zinc-800 overflow-hidden">
-          {raceSession.candidates.slice(0, 2).map((cand, idx) => (
-            <div key={cand.id} className="flex flex-col min-h-0">
-              <div className="flex items-center justify-between border-b border-zinc-800 bg-zinc-950 px-3 py-2">
-                <div className="min-w-0">
-                  <div className="text-xs font-semibold text-white truncate">{cand.label}</div>
-                  <div className="font-mono text-[10px] text-zinc-400">
-                    {cand.model} · {(cand.durationMs / 1000).toFixed(1)}s
-                  </div>
-                </div>
-                <button
-                  disabled={adoptingIdx !== null}
-                  onClick={async () => {
-                    setAdoptingIdx(idx);
-                    try {
-                      await onSelectRaceWinner(idx);
-                    } finally {
-                      setAdoptingIdx(null);
-                    }
-                  }}
-                  className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50 cursor-pointer shrink-0"
-                >
-                  <CheckCircle2 className="h-3.5 w-3.5" />
-                  {adoptingIdx === idx ? '采纳中...' : '采纳此方案'}
-                </button>
-              </div>
-              <div className="flex-1 bg-white">
-                <iframe
-                  title={cand.label}
-                  srcDoc={raceDocs[idx] || ''}
-                  sandbox="allow-scripts allow-forms allow-modals allow-popups"
-                  className="h-full w-full border-0"
-                />
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="flex h-full flex-col bg-[#0c0c0f]">

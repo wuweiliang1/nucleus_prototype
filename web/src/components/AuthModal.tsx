@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { Atom, Loader2, Sparkles, X } from 'lucide-react';
+import { ArrowRight, Loader2, X } from 'lucide-react';
 import { api } from '../api';
 import type { User } from '../types';
+import { NucleusMark } from './NucleusMark';
 
 interface Props {
   onSuccess: (user: User) => void;
@@ -47,11 +48,12 @@ export function AuthModal({ onSuccess, onClose }: Props) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
-      <div className="relative w-full max-w-md rounded-2xl border border-zinc-800 bg-zinc-950 p-6 shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+      <div role="dialog" aria-modal="true" aria-labelledby="auth-title" className="relative max-h-full w-full max-w-md overflow-auto rounded-xl border border-[#3f454a] bg-[#16191c] p-6 shadow-xl">
         {onClose && (
           <button
             onClick={onClose}
+            aria-label="关闭登录窗口"
             className="absolute right-4 top-4 rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
           >
             <X className="h-4 w-4" />
@@ -59,22 +61,20 @@ export function AuthModal({ onSuccess, onClose }: Props) {
         )}
 
         <div className="mb-6 flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-cyan-500 text-white shadow-lg shadow-indigo-500/25">
-            <Atom className="h-5 w-5" />
-          </div>
+          <span className="text-2xl"><NucleusMark /></span>
           <div>
-            <h2 className="text-lg font-semibold text-white">进入 Nucleus Studio</h2>
-            <p className="text-xs text-zinc-400">登录以持久化保存你的多智能体应用与 Cloud 数据</p>
+            <h2 id="auth-title" className="text-lg font-semibold text-white">进入 Nucleus</h2>
+            <p className="text-xs text-zinc-400">登录后即可保存和管理项目</p>
           </div>
         </div>
 
         <button
           onClick={handleGuest}
           disabled={loading}
-          className="mb-4 flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 px-4 py-2.5 text-sm font-medium text-white shadow-lg shadow-indigo-600/20 hover:from-indigo-500 hover:to-violet-500 disabled:opacity-50 cursor-pointer"
+          className="mb-4 flex w-full cursor-pointer items-center justify-center gap-2 rounded-md bg-(--nucleus-accent) px-4 py-2.5 text-sm font-semibold text-[#131809] hover:bg-[#e0f7a4] disabled:opacity-50"
         >
-          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-          一键访客免注册体验（立即可用）
+          以访客身份进入
+          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
         </button>
 
         <div className="my-4 flex items-center gap-3 text-xs text-zinc-500">
@@ -114,7 +114,7 @@ export function AuthModal({ onSuccess, onClose }: Props) {
                 onChange={(e) => setName(e.target.value)}
                 placeholder="你的名字"
                 required
-                className="w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-white placeholder-zinc-500 focus:border-indigo-500 focus:outline-none"
+                className="w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white placeholder-zinc-500 focus:border-(--nucleus-accent) focus:outline-none"
               />
             </div>
           )}
@@ -126,7 +126,7 @@ export function AuthModal({ onSuccess, onClose }: Props) {
               onChange={(e) => setEmail(e.target.value)}
               placeholder="builder@nucleus.dev"
               required
-              className="w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-white placeholder-zinc-500 focus:border-indigo-500 focus:outline-none"
+              className="w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white placeholder-zinc-500 focus:border-(--nucleus-accent) focus:outline-none"
             />
           </div>
           <div>
@@ -138,7 +138,7 @@ export function AuthModal({ onSuccess, onClose }: Props) {
               placeholder="至少 6 位"
               required
               minLength={6}
-              className="w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-white placeholder-zinc-500 focus:border-indigo-500 focus:outline-none"
+              className="w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white placeholder-zinc-500 focus:border-(--nucleus-accent) focus:outline-none"
             />
           </div>
 

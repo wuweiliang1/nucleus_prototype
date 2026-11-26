@@ -13,6 +13,7 @@ spec:
       labels:
         app: nucleus
     spec:
+      terminationGracePeriodSeconds: 120
       imagePullSecrets:
         - name: tcr-image-pull
       tolerations:
@@ -22,7 +23,7 @@ spec:
           effect: NoSchedule
       containers:
         - name: nucleus
-          image: ccr.ccs.tencentyun.com/intnovel/nucleus:latest
+          image: ccr.ccs.tencentyun.com/intnovel/nucleus@sha256:39f761acdcfc1de37cc9d33ffe5021818e4845c5beda5df40517807463c7c014
           imagePullPolicy: Always
           ports:
             - name: http
@@ -30,6 +31,22 @@ spec:
           envFrom:
             - secretRef:
                 name: nucleus-runtime-secrets
+          env:
+            - name: LLM_BASE_URL
+              value: https://api.deepseek.com
+            - name: LLM_MODEL
+              value: deepseek-flash
+            - name: LLM_STREAM_IDLE_TIMEOUT_MS
+              value: "60000"
+            - name: LLM_FALLBACK_MODEL
+              value: deepseek-v4-pro
+            - name: LLM_VISION_MODEL
+              value: deepseek-flash
+            - name: LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: nucleus-deepseek-secrets
+                  key: LLM_API_KEY
           readinessProbe:
             httpGet:
               path: /healthz

@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   Crosshair,
-  Flame,
   Loader2,
   Send,
   Sparkles,
@@ -9,10 +8,11 @@ import {
 } from 'lucide-react';
 import type {
   AgentProfile,
+  ChatDraft,
   ChatMessageItem,
-  RaceProgress,
   SelectedElementContext,
 } from '../types';
+import { PromptComposer } from './PromptComposer';
 
 const AGENT_COLORS: Record<string, { bg: string; badge: string; label: string }> = {
   mike: { bg: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40', badge: 'text-indigo-400', label: 'Mike · Team Lead' },
@@ -25,40 +25,30 @@ interface Props {
   messages: ChatMessageItem[];
   isRunning: boolean;
   activeAgent: { agent: AgentProfile; step: string } | null;
-  raceProgress: Record<'A' | 'B', RaceProgress | null>;
   selectedElement: SelectedElementContext | null;
   onClearSelectedElement: () => void;
-  onSend: (prompt: string, raceMode: boolean) => void;
+  onSend: (draft: ChatDraft) => void;
+  onContinueFromPrd: (summary: string) => void;
+  onOpenBrainstorm: (id: string) => void;
 }
 
 export function AgentChatPanel({
   messages,
   isRunning,
   activeAgent,
-  raceProgress,
   selectedElement,
   onClearSelectedElement,
   onSend,
+  onContinueFromPrd,
+  onOpenBrainstorm,
 }: Props) {
-  const [input, setInput] = useState('');
-  const [raceMode, setRaceMode] = useState(false);
+  const [draft, setDraft] = useState<ChatDraft>({ text: '', images: [] });
   const bottomRef = useRef<HTMLDivElement>(null);
+  const lastMessage = messages[messages.length - 1];
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, activeAgent, raceProgress]);
-
-  function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    const text = input.trim();
-    if (!text || isRunning) return;
-    setInput('');
-    onSend(text, raceMode);
-  }
-
-  function insertMention(agent: string) {
-    setInput((prev) => (prev.startsWith(`@${agent} `) ? prev : `@${agent} ${prev}`));
-  }
+  }, [messages, activeAgent]);
 
   return (
     <div className="flex h-full flex-col bg-zinc-950 border-r border-zinc-800/80">
@@ -78,18 +68,6 @@ export function AgentChatPanel({
             ))}
           </div>
         </div>
-        <div className="flex items-center gap-1">
-          {(['Emma', 'Bob', 'Alex'] as const).map((name) => (
-            <button
-              key={name}
-              type="button"
-              onClick={() => insertMention(name)}
-              className="rounded-md px-1.5 py-0.5 text-[10px] text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 cursor-pointer"
-            >
-              @{name}
-            </button>
-          ))}
-        </div>
       </div>
 
       {/* Messages */}
@@ -106,6 +84,7 @@ export function AgentChatPanel({
 
         {messages.map((msg) => {
           if (msg.role === 'user') {
+            const meetingId = typeof msg.meta?.brainstormSessionId === 'string' ? msg.meta.brainstormSessionId : null;
             return (
               <div key={msg.id} className="flex justify-end">
                 <div className="max-w-[88%] rounded-2xl rounded-tr-sm bg-indigo-600/90 px-3.5 py-2.5 text-xs leading-relaxed text-white shadow-sm">
@@ -115,7 +94,22 @@ export function AgentChatPanel({
                       {(msg.meta?.selectedElement as SelectedElementContext).selector}
                     </div>
                   )}
-                  <div className="whitespace-pre-wrap">{msg.content}</div>
+                  {!!msg.meta?.images?.length && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {msg.meta.images.map((image, index) => (
+                        <img
+                          key={`${index}-${image.name}`}
+                          src={image.dataUrl}
+                          alt={image.name}
+                          loading="lazy"
+                          className="h-24 max-w-full rounded-md object-contain"
+                        />
+                      ))}
+                    </div>
+                  )}
+                  {msg.content && <div className="whitespace-pre-wrap">{msg.content}</div>}
+                  {meetingId && <button type="button" className="mt-1 cursor-pointer underline"
+                    onClick={() => onOpenBrainstorm(meetingId)}>查看关联会议纪要</button>}
                 </div>
               </div>
             );
@@ -141,6 +135,15 @@ export function AgentChatPanel({
                 <div className="rounded-xl rounded-tl-sm border border-zinc-800/80 bg-zinc-900/70 px-3.5 py-2.5 text-xs leading-relaxed text-zinc-200 whitespace-pre-wrap">
                   {msg.content}
                 </div>
+                {!isRunning && msg === lastMessage && msg.agent_name === 'emma' && msg.meta?.artifact === 'prd' && (
+                  <button
+                    type="button"
+                    onClick={() => onContinueFromPrd(msg.content)}
+                    className="mt-2 cursor-pointer rounded-md border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-200 hover:border-(--nucleus-accent) hover:text-(--nucleus-accent)"
+                  >
+                    继续实现
+                  </button>
+                )}
               </div>
             </div>
           );
@@ -161,43 +164,11 @@ export function AgentChatPanel({
           </div>
         )}
 
-        {/* Race Mode Live Track Progress */}
-        {isRunning && (raceProgress.A || raceProgress.B) && (
-          <div className="space-y-2 rounded-xl border border-amber-500/30 bg-amber-500/5 p-3">
-            <div className="flex items-center gap-1.5 text-[11px] font-semibold text-amber-300">
-              <Flame className="h-3.5 w-3.5" />
-              Race Mode 双赛道并行构建中
-            </div>
-            {(['A', 'B'] as const).map((t) => {
-              const p = raceProgress[t];
-              if (!p) return null;
-              return (
-                <div
-                  key={t}
-                  className="flex items-center justify-between rounded-lg bg-zinc-900/80 px-2.5 py-1.5 text-[11px]"
-                >
-                  <div className="truncate">
-                    <span className="font-medium text-zinc-200">{p.label}</span>
-                    <span className="ml-1.5 font-mono text-[10px] text-zinc-500">{p.model}</span>
-                  </div>
-                  {p.status === 'running' ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-400 shrink-0" />
-                  ) : (
-                    <span className="font-mono text-[10px] text-emerald-400 shrink-0">
-                      ✓ {p.durationMs ? `${(p.durationMs / 1000).toFixed(1)}s` : 'Done'}
-                    </span>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-
         <div ref={bottomRef} />
       </div>
 
       {/* Input Area */}
-      <form onSubmit={handleSubmit} className="border-t border-zinc-800/80 p-3 bg-zinc-950">
+      <div className="border-t border-zinc-800/80 p-3 bg-zinc-950">
         {selectedElement && (
           <div className="mb-2 flex items-center justify-between rounded-lg border border-indigo-500/40 bg-indigo-500/10 px-2.5 py-1.5 text-[11px] text-indigo-200">
             <div className="flex items-center gap-1.5 truncate">
@@ -218,51 +189,31 @@ export function AgentChatPanel({
         )}
 
         <div className="rounded-xl border border-zinc-800 bg-zinc-900/80 p-2 focus-within:border-indigo-500/70 transition">
-          <textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                handleSubmit(e);
-              }
+          <PromptComposer
+            draft={draft}
+            setDraft={setDraft}
+            onSend={(message) => {
+              setDraft({ text: '', images: [] });
+              onSend(message);
             }}
-            rows={2}
-            placeholder={
-              selectedElement
-                ? `描述你想如何修改 ${selectedElement.selector}...`
-                : '描述新需求、增量迭代，或 @Emma / @Alex 定向沟通...'
-            }
             disabled={isRunning}
-            className="w-full resize-none bg-transparent px-1.5 py-1 text-xs text-zinc-100 placeholder-zinc-500 focus:outline-none disabled:opacity-50"
+            variant="studio"
+            placeholder={selectedElement
+              ? `描述你想如何修改 ${selectedElement.selector}...`
+              : '描述需求、添加参考图，或输入 @ 提及成员…'}
+            renderSubmit={(disabled) => (
+              <button
+                type="submit"
+                disabled={disabled}
+                className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-40 cursor-pointer"
+              >
+                <Send className="h-3.5 w-3.5" />
+                发送
+              </button>
+            )}
           />
-
-          <div className="mt-1.5 flex items-center justify-between">
-            <button
-              type="button"
-              onClick={() => setRaceMode((v) => !v)}
-              title="开启后并行调用双模型生成两版界面左右 PK"
-              className={`flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium transition cursor-pointer ${
-                raceMode
-                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                  : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 border border-transparent'
-              }`}
-            >
-              <Flame className="h-3.5 w-3.5" />
-              Race Mode {raceMode ? 'ON' : ''}
-            </button>
-
-            <button
-              type="submit"
-              disabled={isRunning || !input.trim()}
-              className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-40 cursor-pointer"
-            >
-              {isRunning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
-              发送
-            </button>
-          </div>
         </div>
-      </form>
+      </div>
     </div>
   );
 }

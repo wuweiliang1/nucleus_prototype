@@ -1,17 +1,21 @@
 import { useEffect, useState } from 'react';
-import { Database, FileText, Layers, RefreshCw } from 'lucide-react';
+import { Database, FileText, Layers, NotebookText, RefreshCw } from 'lucide-react';
 import { api } from '../api';
 import type { SchemaCollection } from '../types';
+import { BrainstormMinutesPanel } from './BrainstormMinutesPanel';
 
 interface Props {
   projectId: string;
   prdMd: string;
   architectureMd: string;
   schemaJson: SchemaCollection[];
+  onOpenBrainstorm: (id: string) => void;
+  onHandoff: (id: string, topic: string) => void;
+  handoffDisabled: boolean;
 }
 
-export function BlueprintPane({ projectId, prdMd, architectureMd, schemaJson }: Props) {
-  const [subTab, setSubTab] = useState<'prd' | 'arch' | 'cloud'>('prd');
+export function BlueprintPane({ projectId, prdMd, architectureMd, schemaJson, onOpenBrainstorm, onHandoff, handoffDisabled }: Props) {
+  const [subTab, setSubTab] = useState<'prd' | 'arch' | 'cloud' | 'minutes'>('prd');
   const [cloudData, setCloudData] = useState<Record<string, Array<Record<string, unknown>>>>({});
   const [totalRows, setTotalRows] = useState(0);
   const [loadingData, setLoadingData] = useState(false);
@@ -40,7 +44,7 @@ export function BlueprintPane({ projectId, prdMd, architectureMd, schemaJson }: 
   return (
     <div className="flex h-full flex-col bg-[#0b0b0e]">
       <div className="flex items-center justify-between border-b border-zinc-800/80 px-4 py-2 bg-zinc-950/60">
-        <div className="flex items-center gap-1">
+        <div className="flex flex-wrap items-center gap-1">
           <button
             onClick={() => setSubTab('prd')}
             className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition cursor-pointer ${
@@ -68,6 +72,16 @@ export function BlueprintPane({ projectId, prdMd, architectureMd, schemaJson }: 
             <Database className="h-3.5 w-3.5" />
             Nucleus Cloud DB ({totalRows})
           </button>
+          <button
+            type="button"
+            onClick={() => setSubTab('minutes')}
+            className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium cursor-pointer ${
+              subTab === 'minutes' ? 'bg-lime-400/10 text-lime-200 border border-lime-300/30' : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            <NotebookText className="h-3.5 w-3.5" />
+            会议纪要
+          </button>
         </div>
 
         {subTab === 'cloud' && (
@@ -82,6 +96,8 @@ export function BlueprintPane({ projectId, prdMd, architectureMd, schemaJson }: 
       </div>
 
       <div className="flex-1 overflow-y-auto p-5">
+        {subTab === 'minutes' && <BrainstormMinutesPanel projectId={projectId} onOpenRoom={onOpenBrainstorm}
+          onHandoff={onHandoff} handoffDisabled={handoffDisabled} />}
         {subTab === 'prd' && (
           <div className="mx-auto max-w-3xl">
             {prdMd ? (

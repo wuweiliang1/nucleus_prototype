@@ -10,19 +10,23 @@
 
 1. **Multi-Agent 虚拟研发团队协作（Shared Context + SSE 实时流）**
    - **Mike（Team Lead）**：意图识别与动态路由（区分从零新建、增量迭代、可视化局部修改、运行时错误修复）。
-   - **Emma（Product Manager）**：输出结构化 PRD 文档，持久化到项目共享上下文。
+   - **Emma（Product Manager）**：更新并保存 PRD。定向发给 Emma 的功能需求会交给工程团队实现。只更新文档时，可以稍后点击「继续实现」。
    - **Bob（System Architect）**：设计系统架构与 Nucleus Cloud 数据模型 Schema。
-   - **Alex（Full-Stack Engineer）**：基于共享上下文生成/增量更新多文件 Web 应用，支持 `@Emma` / `@Bob` / `@Alex` 定向协作。
-2. **Race Mode（双方案并行赛马 PK）**
-   - 一键开启后并行调度两条独立赛道（不同模型/审美方向）同时构建完整可交互应用，右侧左右分屏实时体验，点击「采纳此方案」即可合入主分支并生成版本快照。
-3. **Visual Select-to-Edit（可视化点选修改）+ Runtime Auto-Fix（自愈闭环）**
+   - **Alex（Full-Stack Engineer）**：基于共享上下文生成/增量更新多文件 Web 应用。
+   - 输入 `@` 可选择 Mike、Emma、Bob 或 Alex。`@Mike` 会统筹所需的团队成员。
+2. **图片输入**
+   - 首页和项目聊天支持上传或粘贴截图、设计稿等参考图。每条消息最多 3 张，每张不超过 2 MB，支持 JPEG、PNG、GIF 和 WebP。
+3. **BrainStorm 项目圆桌**
+   - 在工作台选择人类参会或 AI 圆桌，邀请团队成员与虚拟测评者。可附上参考图，逐轮讨论并保存会议记录。
+   - 指定参会角色起草纪要，编辑确认后可从「PRD & DB → 会议纪要」下载 Markdown，或交给 Mike 推进已确认的事项。
+4. **Visual Select-to-Edit（可视化点选修改）+ Runtime Auto-Fix（自愈闭环）**
    - 预览区开启「点选编辑」后，悬停高亮任意 DOM 元素并点击，自动提取 CSS Selector 与 HTML 片段发给 Alex 精准定向修改。
    - 沙箱自动捕获生成应用的运行时异常与未处理 Promise 拒绝，弹出「一键让 Alex 修复」横幅，将错误堆栈回传修复。
-4. **Nucleus Cloud（内置应用级 PostgreSQL 持久化 + 一键发布）**
+5. **Nucleus Cloud（内置应用级 PostgreSQL 持久化 + 一键发布）**
    - 自动向每个生成的应用注入 `window.NucleusDB` SDK（底层对接 PostgreSQL `app_data` 集合隔离 API）。生成出的看板、记账本、投票墙等应用本身即具备真实云端持久化。
    - 内置 **Nucleus Cloud DB Explorer** 实时查看生成应用写入数据库的数据行。
    - 一键发布至公开独立 URL `/p/<slug>`，支持社区 Showcase 展示与一键 **Remix**。
-5. **工程工作流完备性**
+6. **工程工作流完备性**
    - 多文件源码浏览器与在线编辑保存、每次变更自动版本快照与一键回滚、一键导出完整项目 ZIP。
 
 ---
@@ -34,13 +38,13 @@ Web Studio (React 19 + Vite + Tailwind)
    │  REST + SSE Streaming (/api/projects/:id/chat)
    ▼
 Nucleus Server (Node 22 + TypeScript + Express)
-   ├── Multi-Agent Orchestrator (Mike -> Emma -> Bob -> Alex / Race Mode)
-   │      └── OpenAI-Compatible LLM Gateway
+   ├── Multi-Agent Orchestrator (Mike -> Emma -> Bob -> Alex)
+   │      └── OpenAI-Compatible LLM API (DeepSeek text, vision and fallback)
    ├── Runtime Bundler (/p/:slug & Preview Sandbox)
    │      └── Injects window.NucleusDB + Select-to-Edit Inspector + Error Catcher
    └── Cloud DB REST API (/api/runtime/:projectId/collections/:name)
           ▼
-PostgreSQL (users, projects, messages, project_versions, app_data, race_sessions)
+PostgreSQL (users, projects, messages, project_versions, app_data)
 ```
 
 ---

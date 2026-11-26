@@ -215,13 +215,13 @@ export function buildRunnableHtml(params: {
   const scriptTag = jsBlocks ? `<script>\n${jsBlocks}\n</script>` : '';
 
   if (output.includes('</head>')) {
-    output = output.replace('</head>', `${styleTag}\n${nucleusRuntimeScript}\n</head>`);
+    output = output.replace('</head>', () => `${styleTag}\n${nucleusRuntimeScript}\n</head>`);
   } else {
     output = `${styleTag}\n${nucleusRuntimeScript}\n${output}`;
   }
 
   if (output.includes('</body>')) {
-    output = output.replace('</body>', `${scriptTag}\n</body>`);
+    output = output.replace('</body>', () => `${scriptTag}\n</body>`);
   } else {
     output = `${output}\n${scriptTag}`;
   }

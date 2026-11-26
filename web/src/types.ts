@@ -30,13 +30,23 @@ export interface ProjectDetail extends ProjectSummary {
   files: Record<string, string>;
 }
 
+export interface ChatImage {
+  name: string;
+  dataUrl: string;
+}
+
+export interface ChatDraft {
+  text: string;
+  images: ChatImage[];
+}
+
 export interface ChatMessageItem {
   id: string;
   role: 'user' | 'assistant';
   agent_name: string;
   agent_title: string;
   content: string;
-  meta?: Record<string, unknown>;
+  meta?: Record<string, unknown> & { images?: ChatImage[] };
   created_at?: string;
 }
 
@@ -68,31 +78,10 @@ export interface AgentProfile {
   avatar: string;
 }
 
-export interface RaceCandidate {
-  id: string;
-  label: string;
-  model: string;
-  styleDirection: string;
-  summary: string;
-  files: Record<string, string>;
-  durationMs: number;
-}
-
-export interface RaceProgress {
-  track: 'A' | 'B';
-  status: 'running' | 'done' | 'error';
-  label: string;
-  model: string;
-  durationMs?: number;
-  error?: string;
-}
-
 export type SseEvent =
   | { type: 'agent_start'; agent: AgentProfile; step: string }
   | { type: 'agent_message'; agent: AgentProfile; content: string; meta?: Record<string, unknown> }
   | { type: 'artifact_update'; prdMd?: string; architectureMd?: string; schemaJson?: SchemaCollection[] }
   | { type: 'files_update'; files: Record<string, string>; versionNumber: number; summary: string }
-  | ({ type: 'race_progress' } & RaceProgress)
-  | { type: 'race_ready'; sessionId: string; candidates: RaceCandidate[] }
   | { type: 'done'; projectId: string }
-  | { type: 'error'; message: string };
+  | { type: 'error'; message: string; agent?: AgentProfile };

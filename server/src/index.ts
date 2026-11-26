@@ -6,6 +6,7 @@ import { config } from './config.js';
 import { initDatabase, query } from './db.js';
 import { authRouter } from './routes/auth.js';
 import { chatRouter } from './routes/chat.js';
+import { brainstormRouter } from './routes/brainstorm.js';
 import { cloudDbRouter } from './routes/cloudDb.js';
 import { projectsRouter } from './routes/projects.js';
 import { buildRunnableHtml } from './runtime/bundler.js';
@@ -32,6 +33,7 @@ app.get('/healthz', async (_req, res) => {
 app.use('/api/auth', authRouter);
 app.use('/api/projects', projectsRouter);
 app.use('/api/projects', chatRouter);
+app.use('/api/projects/:id/brainstorms', brainstormRouter);
 app.use('/api/runtime', cloudDbRouter);
 
 // Published Apps public hosting: /p/:slug
@@ -82,6 +84,11 @@ async function start() {
   server.requestTimeout = 0;
   server.headersTimeout = 0;
   server.keepAliveTimeout = 65_000;
+  process.once('SIGTERM', () => {
+    // Stop accepting new traffic and let active SSE responses finish.
+    setTimeout(() => process.exit(0), 115_000).unref();
+    server.close(() => process.exit(0));
+  });
 }
 
 start().catch((err) => {

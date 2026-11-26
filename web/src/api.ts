@@ -1,4 +1,5 @@
 import type {
+  ChatImage,
   ChatMessageItem,
   ProjectDetail,
   ProjectSummary,
@@ -8,8 +9,15 @@ import type {
   SseEvent,
   User,
 } from './types';
+import type { ArchivedMinutes, BrainstormAction, BrainstormBrief, BrainstormDetail, BrainstormMode, BrainstormParticipant } from './brainstorm';
 
 const TOKEN_KEY = 'nucleus_auth_token';
+
+export class ApiRequestError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+  }
+}
 
 export function getStoredToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
@@ -20,7 +28,7 @@ export function setStoredToken(token: string | null) {
   else localStorage.removeItem(TOKEN_KEY);
 }
 
-async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
+async function request(path: string, init: RequestInit = {}): Promise<Response> {
   const token = getStoredToken();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -31,9 +39,46 @@ async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const res = await fetch(path, { ...init, headers });
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
-    throw new Error(data.error || `Request failed (${res.status})`);
+    throw new ApiRequestError(data.error || `Request failed (${res.status})`, res.status);
   }
-  return res.json() as Promise<T>;
+  return res;
+}
+
+async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  return (await request(path, init)).json() as Promise<T>;
+}
+
+async function streamEvents<T>(
+  path: string, init: RequestInit, onEvent: (event: T) => boolean | void, onActivity?: () => void,
+) {
+  const res = await request(path, init);
+  if (!res.body) throw new Error('服务器没有返回事件流');
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      onActivity?.();
+      buffer += decoder.decode(value, { stream: true });
+      const frames = buffer.split('\n\n');
+      buffer = frames.pop() || '';
+      for (const frame of frames) {
+        const data = frame.split('\n').find(line => line.startsWith('data: '));
+        if (data && onEvent(JSON.parse(data.slice(6)) as T)) return;
+      }
+    }
+  } finally {
+    await reader.cancel().catch(() => {});
+    reader.releaseLock();
+  }
+}
+
+export class ChatStreamInterruptedError extends Error {
+  constructor() {
+    super('执行连接已中断，请重新打开项目查看最近保存的结果。');
+  }
 }
 
 export const api = {
@@ -78,12 +123,12 @@ export const api = {
       body: JSON.stringify({ title, description }),
     });
   },
-  async getProject(id: string): Promise<{
+  async getProject(id: string, signal?: AbortSignal): Promise<{
     project: ProjectDetail;
     messages: ChatMessageItem[];
     versions: ProjectVersion[];
   }> {
-    return apiFetch(`/api/projects/${id}`);
+    return apiFetch(`/api/projects/${id}`, { signal });
   },
   async deleteProject(id: string): Promise<void> {
     await apiFetch(`/api/projects/${id}`, { method: 'DELETE' });
@@ -119,15 +164,30 @@ export const api = {
       body: JSON.stringify({ files, enableInspector }),
     });
   },
-  async selectRaceWinner(
-    projectId: string,
-    sessionId: string,
-    index: number
-  ): Promise<{ files: Record<string, string>; currentVersion: number; winnerLabel: string }> {
-    return apiFetch(`/api/projects/${projectId}/race/${sessionId}/select`, {
-      method: 'POST',
-      body: JSON.stringify({ index }),
+  listBrainstorms(projectId: string, signal?: AbortSignal): Promise<{ rooms: BrainstormBrief[]; participants: BrainstormParticipant[] }> {
+    return apiFetch(`/api/projects/${projectId}/brainstorms`, { signal });
+  },
+  createBrainstorm(projectId: string, data: {
+    requestId: string; mode: BrainstormMode; topic: string; participants: string[]; roundLimit: number; images: ChatImage[];
+  }): Promise<{ id: string }> {
+    return apiFetch(`/api/projects/${projectId}/brainstorms`, { method: 'POST', body: JSON.stringify(data) });
+  },
+  getBrainstorm(projectId: string, sessionId: string, after?: number, signal?: AbortSignal): Promise<BrainstormDetail> {
+    const suffix = after === undefined ? '' : `?after=${after}&incremental=1`;
+    return apiFetch(`/api/projects/${projectId}/brainstorms/${sessionId}${suffix}`, { signal });
+  },
+  brainstormAction(projectId: string, sessionId: string, action: BrainstormAction): Promise<{ ok: true }> {
+    return apiFetch(`/api/projects/${projectId}/brainstorms/${sessionId}/actions`, {
+      method: 'POST', body: JSON.stringify(action),
     });
+  },
+  watchBrainstorm(projectId: string, sessionId: string, since: number, signal: AbortSignal, onChange: () => void) {
+    return streamEvents<{ type: 'changed' }>(
+      `/api/projects/${projectId}/brainstorms/${sessionId}/events?since=${since}`, { signal }, onChange
+    );
+  },
+  listBrainstormMinutes(projectId: string, signal?: AbortSignal): Promise<{ minutes: ArchivedMinutes[] }> {
+    return apiFetch(`/api/projects/${projectId}/brainstorms/minutes`, { signal });
   },
   async inspectCloudData(projectId: string): Promise<{
     collections: Record<string, Array<Record<string, unknown>>>;
@@ -157,45 +217,39 @@ export const api = {
     projectId: string,
     payload: {
       prompt: string;
-      raceMode?: boolean;
+      images?: ChatImage[];
       selectedElement?: SelectedElementContext | null;
       runtimeError?: RuntimeErrorContext | null;
+      brainstormMinutesId?: string;
     },
     onEvent: (event: SseEvent) => void
   ): Promise<void> {
-    const token = getStoredToken();
-    const res = await fetch(`/api/projects/${projectId}/chat`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      body: JSON.stringify(payload),
-    });
-    if (!res.ok || !res.body) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || `Stream failed (${res.status})`);
+    const controller = new AbortController();
+    let idleTimer: ReturnType<typeof setTimeout> | undefined;
+    function resetIdleTimer() {
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => controller.abort(), 40_000);
     }
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
 
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const parts = buffer.split('\n\n');
-      buffer = parts.pop() || '';
-      for (const part of parts) {
-        const line = part.split('\n').find((l) => l.startsWith('data: '));
-        if (!line) continue;
-        try {
-          const parsed = JSON.parse(line.slice(6)) as SseEvent;
-          onEvent(parsed);
-        } catch {
-          // ignore malformed keepalive
-        }
+    let reachedTerminalEvent = false;
+    resetIdleTimer();
+    try {
+      await streamEvents<SseEvent>(
+        `/api/projects/${projectId}/chat`, { method: 'POST', body: JSON.stringify(payload), signal: controller.signal },
+        event => {
+          reachedTerminalEvent = event.type === 'done' || event.type === 'error';
+          onEvent(event);
+          return reachedTerminalEvent;
+        }, resetIdleTimer,
+      );
+      if (!reachedTerminalEvent) throw new ChatStreamInterruptedError();
+    } catch (error) {
+      if (controller.signal.aborted || error instanceof TypeError || error instanceof DOMException) {
+        throw new ChatStreamInterruptedError();
       }
+      throw error;
+    } finally {
+      clearTimeout(idleTimer);
     }
   },
 };

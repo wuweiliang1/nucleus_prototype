@@ -1,82 +1,89 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ArrowLeft,
-  Atom,
   Code2,
   Download,
   Eye,
   FileText,
   Globe,
   History,
+  MessagesSquare,
   RotateCcw,
 } from 'lucide-react';
-import { api } from '../api';
+import { api, ChatStreamInterruptedError } from '../api';
+import type { WorkspaceLocation, WorkspaceView } from '../workspaceLocation';
 import type {
   AgentProfile,
+  ChatDraft,
   ChatMessageItem,
   ProjectDetail,
   ProjectVersion,
-  RaceCandidate,
-  RaceProgress,
   RuntimeErrorContext,
   SelectedElementContext,
 } from '../types';
 import { AgentChatPanel } from './AgentChatPanel';
 import { BlueprintPane } from './BlueprintPane';
+import { BrainstormPane } from './BrainstormPane';
 import { CodeExplorer } from './CodeExplorer';
 import { PreviewPane } from './PreviewPane';
+import { NucleusMark } from './NucleusMark';
 import { PublishModal } from './PublishModal';
 
 interface Props {
   projectId: string;
-  initialPrompt?: { text: string; raceMode: boolean } | null;
+  view: WorkspaceView;
+  meetingId: string | null;
+  initialPrompt?: ChatDraft | null;
+  onUseInitialPrompt: () => void;
+  onWorkspaceChange: (changes: Partial<Pick<WorkspaceLocation, 'view' | 'meetingId'>>, replace?: boolean) => void;
   onBack: () => void;
 }
 
-export function StudioWorkspace({ projectId, initialPrompt, onBack }: Props) {
+export function StudioWorkspace({ projectId, view: rightTab, meetingId, initialPrompt, onUseInitialPrompt, onWorkspaceChange, onBack }: Props) {
   const [project, setProject] = useState<ProjectDetail | null>(null);
   const [messages, setMessages] = useState<ChatMessageItem[]>([]);
   const [versions, setVersions] = useState<ProjectVersion[]>([]);
-  const [rightTab, setRightTab] = useState<'preview' | 'code' | 'blueprint'>('preview');
+  const [loadError, setLoadError] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [isRunning, setIsRunning] = useState(false);
   const [activeAgent, setActiveAgent] = useState<{ agent: AgentProfile; step: string } | null>(null);
-  const [raceProgress, setRaceProgress] = useState<Record<'A' | 'B', RaceProgress | null>>({
-    A: null,
-    B: null,
-  });
-  const [raceSession, setRaceSession] = useState<{
-    sessionId: string;
-    candidates: RaceCandidate[];
-  } | null>(null);
   const [selectedElement, setSelectedElement] = useState<SelectedElementContext | null>(null);
   const [showPublish, setShowPublish] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const initialTriggeredRef = useRef(false);
+  const mountedRef = useRef(false);
 
-  const loadProject = useCallback(async () => {
-    const data = await api.getProject(projectId);
+  const loadProject = useCallback(async (signal?: AbortSignal) => {
+    const data = await api.getProject(projectId, signal);
+    if (signal?.aborted) return;
     setProject(data.project);
     setMessages(data.messages);
     setVersions(data.versions);
   }, [projectId]);
 
   useEffect(() => {
-    loadProject();
-  }, [loadProject]);
+    const controller = new AbortController();
+    mountedRef.current = true;
+    void loadProject(controller.signal).catch(() => {
+      if (!controller.signal.aborted) setLoadError(true);
+    });
+    return () => {
+      mountedRef.current = false;
+      controller.abort();
+    };
+  }, [loadProject, loadAttempt]);
 
   const handleSend = useCallback(
     async (
-      promptText: string,
-      raceMode: boolean,
-      overrideError?: RuntimeErrorContext | null
+      { text: promptText, images }: ChatDraft,
+      options?: { runtimeError?: RuntimeErrorContext; skipSelection?: boolean; brainstormMinutesId?: string }
     ) => {
       if (isRunning) return;
-      const elementCtx = overrideError ? null : selectedElement;
+      const runtimeError = options?.runtimeError ?? null;
+      const elementCtx = runtimeError || options?.skipSelection ? null : selectedElement;
       setSelectedElement(null);
       setIsRunning(true);
       setActiveAgent(null);
-      setRaceProgress({ A: null, B: null });
-      if (raceMode) setRightTab('preview');
 
       // Optimistic user message
       setMessages((prev) => [
@@ -87,21 +94,28 @@ export function StudioWorkspace({ projectId, initialPrompt, onBack }: Props) {
           agent_name: 'user',
           agent_title: 'User',
           content: promptText,
-          meta: elementCtx ? { selectedElement: elementCtx } : {},
+          meta: {
+            ...(elementCtx && { selectedElement: elementCtx }),
+            ...(images.length > 0 && { images }),
+          },
         },
       ]);
 
+      let respondingAgent: AgentProfile | undefined;
       try {
         await api.streamChat(
           projectId,
           {
             prompt: promptText,
-            raceMode,
+            images,
             selectedElement: elementCtx,
-            runtimeError: overrideError || null,
+            runtimeError,
+            brainstormMinutesId: options?.brainstormMinutesId,
           },
           (ev) => {
+            if (!mountedRef.current) return;
             if (ev.type === 'agent_start') {
+              respondingAgent = ev.agent;
               setActiveAgent({ agent: ev.agent, step: ev.step });
             } else if (ev.type === 'agent_message') {
               setMessages((prev) => [
@@ -136,36 +150,36 @@ export function StudioWorkspace({ projectId, initialPrompt, onBack }: Props) {
                     }
                   : prev
               );
-              setRightTab('preview');
-            } else if (ev.type === 'race_progress') {
-              setRaceProgress((prev) => ({ ...prev, [ev.track]: ev }));
-            } else if (ev.type === 'race_ready') {
-              setRaceSession({ sessionId: ev.sessionId, candidates: ev.candidates });
-              setRightTab('preview');
+              onWorkspaceChange({ view: 'preview' }, true);
             } else if (ev.type === 'error') {
               setMessages((prev) => [
                 ...prev,
                 {
                   id: `err-${Date.now()}`,
                   role: 'assistant',
-                  agent_name: 'mike',
-                  agent_title: 'Team Lead',
+                  agent_name: ev.agent?.id ?? 'mike',
+                  agent_title: ev.agent?.title ?? 'Team Lead',
                   content: `执行遇到异常：${ev.message}`,
                 },
               ]);
             }
           }
         );
-        await loadProject();
+        if (mountedRef.current) await loadProject();
       } catch (err) {
+        if (!mountedRef.current) return;
+        const synced = err instanceof ChatStreamInterruptedError &&
+          await loadProject(AbortSignal.timeout(8000)).then(() => true, () => false);
         setMessages((prev) => [
           ...prev,
           {
             id: `err-${Date.now()}`,
             role: 'assistant',
-            agent_name: 'mike',
-            agent_title: 'Team Lead',
-            content: `请求失败：${err instanceof Error ? err.message : '未知错误'}`,
+            agent_name: respondingAgent?.id ?? 'mike',
+            agent_title: respondingAgent?.title ?? 'Team Lead',
+            content: synced
+              ? '执行连接已中断，已重新读取最近保存的结果。请检查版本后再重试。'
+              : `请求失败：${err instanceof Error ? err.message : '未知错误'}`,
           },
         ]);
       } finally {
@@ -173,16 +187,28 @@ export function StudioWorkspace({ projectId, initialPrompt, onBack }: Props) {
         setActiveAgent(null);
       }
     },
-    [isRunning, projectId, selectedElement, loadProject]
+    [isRunning, projectId, selectedElement, loadProject, onWorkspaceChange]
   );
+
+  function openBrainstorm(id: string) {
+    onWorkspaceChange({ view: 'brainstorm', meetingId: id });
+  }
+
+  function handoffMinutes(id: string, topic: string) {
+    if (isRunning) return;
+    onWorkspaceChange({ view: 'preview' });
+    void handleSend({ text: `@Mike 请根据已确认的 BrainStorm 纪要「${topic}」推进已定事项。`, images: [] },
+      { skipSelection: true, brainstormMinutesId: id });
+  }
 
   // Trigger initial prompt when arriving from LandingHub
   useEffect(() => {
     if (project && initialPrompt && !initialTriggeredRef.current && messages.length === 0) {
       initialTriggeredRef.current = true;
-      handleSend(initialPrompt.text, initialPrompt.raceMode);
+      onUseInitialPrompt();
+      handleSend(initialPrompt);
     }
-  }, [project, initialPrompt, messages.length, handleSend]);
+  }, [project, initialPrompt, messages.length, handleSend, onUseInitialPrompt]);
 
   async function handleSaveFiles(files: Record<string, string>) {
     const res = await api.saveFiles(projectId, files);
@@ -199,20 +225,29 @@ export function StudioWorkspace({ projectId, initialPrompt, onBack }: Props) {
     await loadProject();
   }
 
-  async function handleSelectRaceWinner(index: number) {
-    if (!raceSession) return;
-    const res = await api.selectRaceWinner(projectId, raceSession.sessionId, index);
-    setProject((prev) =>
-      prev ? { ...prev, files: res.files, current_version: res.currentVersion } : prev
+  if (loadError) {
+    return (
+      <main className="grid h-screen place-content-center gap-3 bg-[#09090b] p-5 text-zinc-100">
+        <p role="alert" className="text-sm">无法打开工作区。请确认链接有效，且当前账号有权访问。</p>
+        <div className="flex gap-2 text-xs">
+          <button type="button" className="rounded-lg border border-zinc-700 px-3 py-2" onClick={onBack}>返回工作台</button>
+          <button type="button" className="rounded-lg bg-zinc-800 px-3 py-2" onClick={() => {
+            setLoadError(false);
+            setLoadAttempt(attempt => attempt + 1);
+          }}>重新加载</button>
+        </div>
+      </main>
     );
-    setRaceSession(null);
-    await loadProject();
+  }
+
+  if (!project) {
+    return <main role="status" className="grid h-screen place-content-center bg-[#09090b] text-sm text-zinc-400">正在加载工作区…</main>;
   }
 
   return (
     <div className="flex h-screen flex-col bg-[#09090b] text-zinc-100 overflow-hidden">
       {/* Top Bar */}
-      <header className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-zinc-800/90 bg-zinc-950 px-3">
+      <header className="flex min-h-12 shrink-0 flex-wrap items-center justify-between gap-2 border-b border-zinc-800/90 bg-zinc-950 px-3 py-1 lg:flex-nowrap">
         <div className="flex items-center gap-2 min-w-0">
           <button
             onClick={onBack}
@@ -223,8 +258,8 @@ export function StudioWorkspace({ projectId, initialPrompt, onBack }: Props) {
           </button>
           <div className="h-4 w-px shrink-0 bg-zinc-800" />
           <div className="flex items-center gap-2 min-w-0">
-            <Atom className="h-4 w-4 text-indigo-400 shrink-0" />
-            <span className="truncate max-w-[160px] text-sm font-semibold text-white">
+            <NucleusMark />
+            <span className="truncate max-w-[90px] text-sm font-semibold text-white sm:max-w-[160px]">
               {project?.title || '加载中...'}
             </span>
             {project && project.current_version > 0 && (
@@ -236,9 +271,10 @@ export function StudioWorkspace({ projectId, initialPrompt, onBack }: Props) {
         </div>
 
         {/* Center Tabs */}
-        <div className="flex shrink-0 items-center gap-1 rounded-lg bg-zinc-900 p-0.5 border border-zinc-800">
+        <div className="order-last flex w-full items-center gap-1 overflow-x-auto rounded-lg bg-zinc-900 p-0.5 border border-zinc-800 lg:order-none lg:w-auto lg:shrink-0">
           <button
-            onClick={() => setRightTab('preview')}
+            aria-pressed={rightTab === 'preview'}
+            onClick={() => onWorkspaceChange({ view: 'preview' })}
             className={`flex whitespace-nowrap items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition cursor-pointer ${
               rightTab === 'preview' ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:text-zinc-200'
             }`}
@@ -247,7 +283,8 @@ export function StudioWorkspace({ projectId, initialPrompt, onBack }: Props) {
             Preview
           </button>
           <button
-            onClick={() => setRightTab('code')}
+            aria-pressed={rightTab === 'code'}
+            onClick={() => onWorkspaceChange({ view: 'code' })}
             className={`flex whitespace-nowrap items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition cursor-pointer ${
               rightTab === 'code' ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:text-zinc-200'
             }`}
@@ -256,13 +293,24 @@ export function StudioWorkspace({ projectId, initialPrompt, onBack }: Props) {
             Code
           </button>
           <button
-            onClick={() => setRightTab('blueprint')}
+            aria-pressed={rightTab === 'blueprint'}
+            onClick={() => onWorkspaceChange({ view: 'blueprint' })}
             className={`flex whitespace-nowrap items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition cursor-pointer ${
               rightTab === 'blueprint' ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:text-zinc-200'
             }`}
           >
             <FileText className="h-3.5 w-3.5" />
             PRD & DB
+          </button>
+          <button
+            aria-pressed={rightTab === 'brainstorm'}
+            onClick={() => onWorkspaceChange({ view: 'brainstorm' })}
+            className={`flex whitespace-nowrap items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium cursor-pointer ${
+              rightTab === 'brainstorm' ? 'bg-lime-400/10 text-lime-200' : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            <MessagesSquare className="h-3.5 w-3.5" />
+            BrainStorm
           </button>
         </div>
 
@@ -271,10 +319,11 @@ export function StudioWorkspace({ projectId, initialPrompt, onBack }: Props) {
           <div className="relative">
             <button
               onClick={() => setShowHistory((v) => !v)}
+              aria-label={`版本 (${versions.length})`}
               className="flex whitespace-nowrap items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 cursor-pointer"
             >
               <History className="h-3.5 w-3.5" />
-              版本 ({versions.length})
+              <span className="hidden sm:inline">版本 ({versions.length})</span>
             </button>
             {showHistory && (
               <div className="absolute right-0 top-10 z-40 w-72 rounded-xl border border-zinc-800 bg-zinc-950 p-2 shadow-2xl">
@@ -310,36 +359,45 @@ export function StudioWorkspace({ projectId, initialPrompt, onBack }: Props) {
 
           <button
             onClick={() => project && api.downloadExportZip(project.id, project.title)}
+            aria-label="导出 ZIP"
             disabled={!project || Object.keys(project.files || {}).length === 0}
             className="flex whitespace-nowrap items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-40 cursor-pointer"
           >
             <Download className="h-3.5 w-3.5" />
-            导出 ZIP
+            <span className="hidden sm:inline">导出 ZIP</span>
           </button>
 
           <button
             onClick={() => setShowPublish(true)}
+            aria-label={project?.published_slug ? '已发布' : '发布上线'}
             disabled={!project || Object.keys(project.files || {}).length === 0}
             className="flex whitespace-nowrap items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-40 cursor-pointer"
           >
             <Globe className="h-3.5 w-3.5" />
-            {project?.published_slug ? '已发布' : '发布上线'}
+            <span className="hidden sm:inline">{project?.published_slug ? '已发布' : '发布上线'}</span>
           </button>
         </div>
       </header>
 
       {/* Main Split Body */}
-      <div className="flex flex-1 min-h-0">
+      {rightTab === 'brainstorm' ? (
+        <BrainstormPane projectId={projectId} sessionId={meetingId} onSelect={id => onWorkspaceChange({ meetingId: id })}
+          onHandoff={handoffMinutes} handoffDisabled={isRunning} />
+      ) : <div className="flex flex-1 min-h-0">
         {/* Left: Multi-Agent Chat */}
         <div className="w-[380px] lg:w-[410px] shrink-0 h-full">
           <AgentChatPanel
             messages={messages}
             isRunning={isRunning}
             activeAgent={activeAgent}
-            raceProgress={raceProgress}
             selectedElement={selectedElement}
             onClearSelectedElement={() => setSelectedElement(null)}
-            onSend={(text, race) => handleSend(text, race)}
+            onSend={handleSend}
+            onOpenBrainstorm={openBrainstorm}
+            onContinueFromPrd={(summary) => handleSend({
+              text: `@Mike 请基于已保存的 PRD 实现最近补充的需求，并复用现有架构和代码。最近的 PRD 更新摘要：${summary}`,
+              images: [],
+            }, { skipSelection: true })}
           />
         </div>
 
@@ -349,12 +407,9 @@ export function StudioWorkspace({ projectId, initialPrompt, onBack }: Props) {
             <PreviewPane
               projectId={projectId}
               files={project?.files || {}}
-              raceSession={raceSession}
-              onSelectRaceWinner={handleSelectRaceWinner}
-              onDismissRace={() => setRaceSession(null)}
               onElementSelected={(el) => setSelectedElement(el)}
               onAutoFixError={(err) =>
-                handleSend(`请修复预览中出现的运行时错误：${err.message}`, false, err)
+                handleSend({ text: `请修复预览中出现的运行时错误：${err.message}`, images: [] }, { runtimeError: err })
               }
             />
           )}
@@ -367,10 +422,13 @@ export function StudioWorkspace({ projectId, initialPrompt, onBack }: Props) {
               prdMd={project?.prd_md || ''}
               architectureMd={project?.architecture_md || ''}
               schemaJson={project?.schema_json || []}
+              onOpenBrainstorm={openBrainstorm}
+              onHandoff={handoffMinutes}
+              handoffDisabled={isRunning}
             />
           )}
         </div>
-      </div>
+      </div>}
 
       {showPublish && project && (
         <PublishModal
