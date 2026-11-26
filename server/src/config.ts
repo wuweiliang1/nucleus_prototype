@@ -11,6 +11,6 @@ export const config = {
     apiKey: process.env.LLM_API_KEY || '',
     model: process.env.LLM_MODEL || 'gemini-4-hydrogen',
     raceModel: process.env.LLM_RACE_MODEL || 'gemini-4-neon',
-    timeoutMs: Number(process.env.LLM_TIMEOUT_MS || 180_000),
+    timeoutMs: Number(process.env.LLM_TIMEOUT_MS || 240_000),
   },
 };

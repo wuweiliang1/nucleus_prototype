@@ -57,8 +57,17 @@ chatRouter.post('/:id/chat', requireAuth, async (req, res) => {
   res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders?.();
 
+  // Keepalive heartbeat every 8s to prevent CLB / proxy 60s idle timeout during long LLM calls
+  const heartbeat = setInterval(() => {
+    if (!res.writableEnded) {
+      res.write(': keepalive\n\n');
+    }
+  }, 8000);
+
   const emit = (event: SseEvent) => {
-    res.write(`data: ${JSON.stringify(event)}\n\n`);
+    if (!res.writableEnded) {
+      res.write(`data: ${JSON.stringify(event)}\n\n`);
+    }
   };
 
   try {
@@ -79,6 +88,7 @@ chatRouter.post('/:id/chat', requireAuth, async (req, res) => {
     }
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : 'Agent execution failed';
+    console.error(`[Nucleus] Chat error on project ${projectId}:`, errMsg);
     await query(
       `INSERT INTO messages (id, project_id, role, agent_name, agent_title, content, meta)
        VALUES ($1, $2, 'assistant', 'mike', 'Team Lead', $3, $4::jsonb)`,
@@ -94,7 +104,10 @@ chatRouter.post('/:id/chat', requireAuth, async (req, res) => {
       message: errMsg,
     });
   } finally {
-    res.end();
+    clearInterval(heartbeat);
+    if (!res.writableEnded) {
+      res.end();
+    }
   }
 });
 

@@ -76,9 +76,12 @@ app.get('*', (req, res, next) => {
 
 async function start() {
   await initDatabase();
-  app.listen(config.port, '0.0.0.0', () => {
+  const server = app.listen(config.port, '0.0.0.0', () => {
     console.log(`[Nucleus] Server listening on http://0.0.0.0:${config.port} (model=${config.llm.model})`);
   });
+  server.requestTimeout = 0;
+  server.headersTimeout = 0;
+  server.keepAliveTimeout = 65_000;
 }
 
 start().catch((err) => {
