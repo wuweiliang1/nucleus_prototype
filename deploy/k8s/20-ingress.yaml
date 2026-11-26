@@ -7,6 +7,10 @@ metadata:
     kubernetes.io/ingress.class: qcloud
     ingress.cloud.tencent.com/pass-to-target: "true"
 spec:
+  tls:
+    - hosts:
+        - nucleus.soleusforce.cn
+      secretName: nucleus-ingress-cert
   rules:
     - host: nucleus.soleusforce.cn
       http:
