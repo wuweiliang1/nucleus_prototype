@@ -1,0 +1,1 @@
+{"root":["./src/app.tsx","./src/api.ts","./src/main.tsx","./src/types.ts","./src/components/agentchatpanel.tsx","./src/components/authmodal.tsx","./src/components/blueprintpane.tsx","./src/components/codeexplorer.tsx","./src/components/landinghub.tsx","./src/components/previewpane.tsx","./src/components/publishmodal.tsx","./src/components/studioworkspace.tsx"],"version":"5.9.3"}

@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nucleus
+  namespace: nucleus
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nucleus
+  template:
+    metadata:
+      labels:
+        app: nucleus
+    spec:
+      imagePullSecrets:
+        - name: tcr-image-pull
+      tolerations:
+        - key: workload
+          operator: Equal
+          value: intnovel-staging-business
+          effect: NoSchedule
+      containers:
+        - name: nucleus
+          image: ccr.ccs.tencentyun.com/intnovel/nucleus:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - secretRef:
+                name: nucleus-runtime-secrets
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 3
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nucleus
+  namespace: nucleus
+spec:
+  selector:
+    app: nucleus
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
