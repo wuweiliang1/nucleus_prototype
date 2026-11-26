@@ -1,7 +1,7 @@
 # Nucleus — AI-Native Multi-Agent App Studio 笔试交付说明
 
 > **在线体验地址**：`https://nucleus.soleusforce.cn`（支持**一键访客免注册体验**，也支持邮箱注册登录）  
-> **GitHub 源码地址**：`<请在此粘贴你的 Public GitHub 仓库链接>`
+> **GitHub 源码地址**：`https://github.com/wuweiliang1/nucleus_prototype`
 
 ---
 
