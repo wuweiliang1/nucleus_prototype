@@ -78,13 +78,20 @@ CRITICAL RUNTIME ENVIRONMENT:
 6. INCREMENTAL EDITS:
    - If existing files are provided, preserve working features and return the complete updated content for every file you touch (usually all 3 files so nothing goes out of sync).
 
-Output strict JSON ONLY:
-{
-  "chatSummary": "2-3 concise sentences explaining what you built or changed, in the user's language.",
-  "versionSummary": "Short changelog title (max 50 chars)",
-  "files": {
-    "index.html": "<!DOCTYPE html>...",
-    "styles.css": "/* ... */",
-    "app.js": "// ..."
-  }
-}`;
+Output format (STRICT — do NOT wrap the entire response in JSON; use XML tags directly so code needs zero JSON escaping):
+<summary>
+2-3 concise sentences explaining what you built or changed, in the user's language.
+</summary>
+<version>Short changelog title (max 50 chars)</version>
+<file path="index.html">
+<!DOCTYPE html>
+...
+</file>
+<file path="styles.css">
+/* ... */
+</file>
+<file path="app.js">
+// ...
+</file>
+
+Keep code clean, modular, and concise (aim for high visual polish without redundant boilerplate) so every file completes cleanly.`;

@@ -17,6 +17,51 @@ import {
   type SseEvent,
 } from './types.js';
 
+function parseAlexOutput(raw: string): {
+  chatSummary: string;
+  versionSummary: string;
+  files: Record<string, string>;
+} {
+  const files: Record<string, string> = {};
+  const fileRegex = /<file\s+path=["']([^"']+)["']\s*>([\s\S]*?)<\/file>/gi;
+  let match: RegExpExecArray | null;
+  while ((match = fileRegex.exec(raw)) !== null) {
+    const filePath = match[1].trim();
+    let content = match[2].replace(/^\r?\n/, '').replace(/\r?\n$/, '');
+    // Strip accidental markdown fence inside <file>
+    const fence = content.match(/^```[a-zA-Z0-9_-]*\r?\n([\s\S]*?)\r?\n```$/);
+    if (fence) content = fence[1];
+    if (filePath && content) {
+      files[filePath] = content;
+    }
+  }
+
+  if (Object.keys(files).length > 0) {
+    const summaryMatch = raw.match(/<summary>([\s\S]*?)<\/summary>/i);
+    const versionMatch = raw.match(/<version>([\s\S]*?)<\/version>/i);
+    return {
+      chatSummary: summaryMatch?.[1]?.trim() || '已完成应用代码构建并写入工作区。',
+      versionSummary: versionMatch?.[1]?.trim().slice(0, 60) || '应用更新',
+      files,
+    };
+  }
+
+  // Fallback: try JSON if model still responded in JSON
+  const parsed = extractJsonObject<{
+    chatSummary?: string;
+    versionSummary?: string;
+    files?: Record<string, string>;
+  }>(raw);
+  if (!parsed.files || Object.keys(parsed.files).length === 0) {
+    throw new Error('Alex 未返回有效的代码文件，请重试');
+  }
+  return {
+    chatSummary: parsed.chatSummary || '已完成应用代码构建并写入工作区。',
+    versionSummary: parsed.versionSummary || '应用更新',
+    files: parsed.files,
+  };
+}
+
 async function saveAgentMessage(
   projectId: string,
   agentId: AgentId,
@@ -193,14 +238,10 @@ export async function runMultiAgentPipeline(
         { role: 'system', content: ALEX_ENGINEER_PROMPT },
         { role: 'user', content: alexContextParts.join('\n\n---\n\n') },
       ],
-      { temperature: 0.35, maxTokens: 16000, jsonMode: true }
+      { temperature: 0.35, maxTokens: 32000, jsonMode: false }
     );
 
-    const alex = extractJsonObject<{
-      chatSummary: string;
-      versionSummary?: string;
-      files: Record<string, string>;
-    }>(alexRaw);
+    const alex = parseAlexOutput(alexRaw);
 
     const mergedFiles: Record<string, string> = {
       ...input.existingFiles,
@@ -321,7 +362,7 @@ export async function runRaceModePipeline(
           { role: 'system', content: ALEX_ENGINEER_PROMPT },
           { role: 'user', content: buildPrompt },
         ],
-        { model: t.model, temperature: t.temperature, maxTokens: 16000, jsonMode: true }
+        { model: t.model, temperature: t.temperature, maxTokens: 32000, jsonMode: false }
       );
     } catch {
       // Fallback to primary model if secondary race model is unavailable
@@ -331,15 +372,11 @@ export async function runRaceModePipeline(
           { role: 'system', content: ALEX_ENGINEER_PROMPT },
           { role: 'user', content: buildPrompt },
         ],
-        { model: usedModel, temperature: t.temperature, maxTokens: 16000, jsonMode: true }
+        { model: usedModel, temperature: t.temperature, maxTokens: 32000, jsonMode: false }
       );
     }
 
-    const parsed = extractJsonObject<{
-      chatSummary: string;
-      versionSummary?: string;
-      files: Record<string, string>;
-    }>(raw);
+    const parsed = parseAlexOutput(raw);
 
     const durationMs = Date.now() - started;
     emit({
