@@ -26,9 +26,49 @@
 
 ## 二、实现思路与关键工程取舍
 
-### 1. 系统架构概览
-- **全栈单仓（React 19 + Vite + Tailwind CSS + Node 22 / TypeScript / Express）**：单 Docker 镜像多阶段构建，后端同时承担 API、SSE 流式编排、前端静态资源托管以及 `/p/:slug` 发布应用托管，部署在独立 Kubernetes Namespace（`nucleus`）中，后端直连生产级 **PostgreSQL**。
-- **核心数据模型（PostgreSQL）**：`users`、`projects`、`messages`、`project_versions`、`app_data`（按 `project_id + collection` 隔离的应用级云端持久化存储）、以及 BrainStorm 圆桌会议的 `sessions / turns / minutes` 持久化表。
+### 1. 现网生产级部署架构（TKE + PostgreSQL）
+区别于常见的静态托管或内存/本地 SQLite 原型，Nucleus 直接按照**现网生产标准**部署在腾讯云 TKE Kubernetes 集群的独立 Namespace（`nucleus`）中，具备完整的网络隔离、健康探针、密钥管理与持久化能力：
+
+```mermaid
+flowchart TB
+    User["用户 / 面试官浏览器"]
+    DNS["DNS 解析<br/>nucleus.soleusforce.cn"]
+    CLB["腾讯云 CLB + qcloud Ingress<br/>HTTPS 443 TLS 终止 / pass-to-target"]
+
+    subgraph TKE["腾讯云 TKE 集群 · Namespace: nucleus（资源与调度隔离）"]
+        SVC["K8s Service (NodePort)<br/>nucleus:80 -> 8080"]
+        subgraph POD["Nucleus App Pod (Docker Multi-Stage · Node 22 Alpine)"]
+            WEB["React 19 + Vite 静态前端托管"]
+            API["Express API + SSE 流式编排引擎<br/>(Mike / Emma / Bob / Alex / BrainStorm)"]
+            BUNDLER["Runtime Bundler & /p/:slug 公开托管<br/>(注入 NucleusDB SDK / Inspector / Error Catcher)"]
+            PROBE["/healthz 探针<br/>Readiness & Liveness (含 DB 连通校验)"]
+        end
+        SEC["K8s Secrets<br/>nucleus-runtime-secrets / tcr-image-pull / TLS Cert"]
+    end
+
+    subgraph DATA["VPC 内网数据与镜像基础设施"]
+        PG[("生产级 PostgreSQL<br/>VPC 内网直连 · 独立库 nucleus<br/>users / projects / messages / versions<br/>app_data / brainstorm_*")]
+        TCR["腾讯云 TCR 私有镜像仓库"]
+    end
+
+    subgraph LLM["外部多模态大模型网关"]
+        PRIMARY["Primary LLM Provider<br/>文本主模型 (stream: true)"]
+        FALLBACK["Secondary / Vision Provider<br/>备用降级模型 & 视觉理解模型"]
+    end
+
+    User -->|"HTTPS / SSE"| DNS --> CLB --> SVC --> POD
+    SEC -.->|"环境变量 & 镜像拉取凭证"| POD
+    TCR -.->|"镜像拉取"| POD
+    API -->|"pg.Pool (KeepAlive)"| PG
+    BUNDLER -->|"Cloud DB REST API"| PG
+    API -->|"流式调用 + 空闲超时检测 + 自动降级"| PRIMARY
+    API -.->|"5xx/超时自动切换 & 图片路由"| FALLBACK
+```
+
+**生产级工程细节落地点**：
+- **容器与调度隔离**：单仓库多阶段 `Dockerfile` 构建精简 Alpine 镜像推入私有 TCR；通过独立 `nucleus` Namespace、CPU/Memory `requests/limits` 配额及 `tolerations` 隔离业务节点，零侵入复用集群基础设施。
+- **全链路高可用**：配置 K8s `readinessProbe` / `livenessProbe`（`/healthz` 实时探测 PostgreSQL 连通性）；PostgreSQL 连接池启用 `keepAlive` 与异常监听，杜绝瞬断导致进程退出；针对 CLB 60s 空闲断连与网关超时，实现**下游 8s SSE 心跳保活 + 上游流式空闲超时检测 + 主/备与视觉模型自动降级重试**。
+- **数据模型与多租户隔离（PostgreSQL）**：在独立 `nucleus` 数据库中自动完成表结构初始化，涵盖 `users`、`projects`、`messages`、`project_versions`、`app_data`（按 `project_id + collection` 逻辑隔离的应用级云端持久化存储），以及 BrainStorm 圆桌会议的 `sessions / turns / minutes`（含 `revision` 乐观锁与 `lease_token` 并发租约）。
 
 ### 2. 关键架构与工程取舍
 
